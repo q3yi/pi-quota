@@ -12,7 +12,7 @@ Supported providers:
 ```bash
 deno task typecheck
 
-pi -e ./src/index.ts
+pi -e ./extensions/pi-quota.ts
 # or
 pi install /path/to/pi-quota
 ```

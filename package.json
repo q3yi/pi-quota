@@ -6,6 +6,6 @@
   "keywords": ["pi-package", "pi", "extension", "quota", "codex", "opencode-go"],
   "license": "MIT",
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": ["./extensions/pi-quota.ts"]
   }
 }
