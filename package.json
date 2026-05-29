@@ -1,0 +1,11 @@
+{
+  "name": "pi-quota",
+  "version": "0.1.0",
+  "description": "Pi extension showing remaining coding plan quota for OpenAI Codex and OpenCode Go.",
+  "type": "module",
+  "keywords": ["pi-package", "pi", "extension", "quota", "codex", "opencode-go"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  }
+}

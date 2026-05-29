@@ -1,0 +1,17 @@
+{
+  "name": "pi-quota",
+  "version": "0.1.0",
+  "description": "Pi extension showing remaining coding plan quota for OpenAI Codex and OpenCode Go.",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "imports": {
+    "@mariozechner/pi-coding-agent": "npm:@mariozechner/pi-coding-agent@^0.73.1"
+  },
+  "nodeModulesDir": "auto",
+  "tasks": {
+    "typecheck": "deno check src/index.ts"
+  },
+  "compilerOptions": {
+    "strict": true
+  }
+}
