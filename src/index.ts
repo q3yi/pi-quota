@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { getCodexAuth } from "./auth.ts";
-import { formatErrorMessage, formatErrorState, formatUsageReport, formatUsageSegments } from "./format.ts";
+import { formatErrorState, formatUsageReport, formatUsageSegments } from "./format.ts";
 import { fetchCodexUsage } from "./providers/codex.ts";
 import { fetchOpenCodeGoUsage } from "./providers/opencode-go.ts";
 import { resolveOpenCodeGoConfigCached } from "./providers/opencode-go-config.ts";
@@ -80,7 +80,6 @@ export default function (pi: ExtensionAPI): void {
       showSnapshotStatus(snapshot, dim);
     } catch (error) {
       if (!stillCurrent()) return;
-      currentCtx?.ui.notify(formatErrorMessage(error), "error");
       showStatus(formatErrorState(error), dim);
     }
   }

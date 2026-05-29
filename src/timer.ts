@@ -4,7 +4,7 @@ export interface PeriodicRefreshController {
   isRunning: () => boolean;
 }
 
-const DEFAULT_INTERVAL_MS = 60_000;
+const DEFAULT_INTERVAL_MS = 90_000;
 
 export function createPeriodicRefresh(refresh: () => Promise<void>): PeriodicRefreshController {
   let intervalId: ReturnType<typeof setInterval> | null = null;

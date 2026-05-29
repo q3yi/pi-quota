@@ -37,8 +37,11 @@ export function formatUsageReport(snapshot: UsageSnapshot): string {
   return lines.join("\n");
 }
 
-export function formatErrorState(_error: unknown): string {
-  return "⚠ quota unavailable";
+export function formatErrorState(error: unknown): string {
+  const brief = error instanceof Error ? error.message : String(error ?? "unknown");
+  // Keep it short for the status line
+  const short = brief.split("\n")[0]!.slice(0, 60);
+  return `⚠ quota: ${short}`;
 }
 
 export function formatErrorMessage(error: unknown): string {

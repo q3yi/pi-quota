@@ -2,7 +2,7 @@ import type { ResetStyle, UsageSnapshot } from "../types.ts";
 import type { CodexAuthConfig } from "../auth.ts";
 
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
-const REQUEST_TIMEOUT_MS = 5_000;
+const REQUEST_TIMEOUT_MS = 8_000;
 
 export function parseCodexUsageResponse(data: unknown, now = Date.now()): UsageSnapshot {
   const root = asRecord(data);
