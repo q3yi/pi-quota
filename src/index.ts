@@ -24,20 +24,55 @@ export default function (pi: ExtensionAPI): void {
   let currentCtx: PiContext | null = null;
   let lastSnapshot: UsageSnapshot | null = null;
   let refreshSeq = 0;
+  let lifecycleSeq = 0;
 
-  function showStatus(text: string | undefined, dim?: boolean): void {
-    currentCtx?.ui.setWidget(STATUS_ID, undefined);
-    currentCtx?.ui.setStatus(STATUS_ID, text && dim ? `◌ ${text}` : text);
+  function activateCtx(ctx: PiContext): number {
+    currentCtx = ctx;
+    return lifecycleSeq;
   }
 
-  function showSnapshotStatus(snapshot: UsageSnapshot, dim?: boolean): void {
-    showStatus(formatThemedUsageStatus(snapshot), dim);
+  function invalidateCtx(): void {
+    currentCtx = null;
+    lifecycleSeq++;
+    refreshSeq++;
   }
 
-  function formatThemedUsageStatus(snapshot: UsageSnapshot): string {
+  function isActive(ctx: PiContext, lifecycle: number): boolean {
+    return lifecycle === lifecycleSeq && currentCtx === ctx;
+  }
+
+  function ignoreStaleCtxError(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("extension ctx is stale")) throw error;
+  }
+
+  function showStatus(ctx: PiContext, lifecycle: number, text: string | undefined, dim?: boolean): void {
+    if (!isActive(ctx, lifecycle)) return;
+    try {
+      ctx.ui.setWidget(STATUS_ID, undefined);
+      ctx.ui.setStatus(STATUS_ID, text && dim ? `◌ ${text}` : text);
+    } catch (error) {
+      ignoreStaleCtxError(error);
+    }
+  }
+
+  function showSnapshotStatus(ctx: PiContext, lifecycle: number, snapshot: UsageSnapshot, dim?: boolean): void {
+    showStatus(ctx, lifecycle, formatThemedUsageStatus(ctx, lifecycle, snapshot), dim);
+  }
+
+  function formatThemedUsageStatus(ctx: PiContext, lifecycle: number, snapshot: UsageSnapshot): string {
     const segments = formatUsageSegments(snapshot);
-    const theme = currentCtx?.ui.theme;
+    let theme: PiTheme | undefined;
+    if (isActive(ctx, lifecycle)) {
+      try {
+        theme = ctx.ui.theme;
+      } catch (error) {
+        ignoreStaleCtxError(error);
+      }
+    }
     if (!theme?.bg || !theme.fg) return segments.map((segment) => segment.text).join(" · ");
+    const bg = theme.bg.bind(theme);
+    const fg = theme.fg.bind(theme);
 
     return segments
       .map((segment) => {
@@ -45,9 +80,9 @@ export default function (pi: ExtensionAPI): void {
         const usedText = segment.text.slice(0, fillLength);
         const remainingText = segment.text.slice(fillLength);
         const color = colorForSeverity(segment.severity);
-        return `${usedText ? theme.bg(color.background, usedText) : ""}${remainingText ? theme.fg(color.foreground, remainingText) : ""}`;
+        return `${usedText ? bg(color.background, usedText) : ""}${remainingText ? fg(color.foreground, remainingText) : ""}`;
       })
-      .join(theme.fg("muted", " · "));
+      .join(fg("muted", " · "));
   }
 
   async function fetchActiveUsage(provider: UsageProvider, ctx: PiContext): Promise<UsageSnapshot> {
@@ -67,57 +102,62 @@ export default function (pi: ExtensionAPI): void {
   }
 
   async function refreshUsage(ctx: PiContext, dim?: boolean): Promise<void> {
-    currentCtx = ctx;
+    const lifecycle = activateCtx(ctx);
     const seq = ++refreshSeq;
     const provider = selectUsageProvider(ctx.model);
-    if (!provider) return showStatus(undefined);
+    if (!provider) return showStatus(ctx, lifecycle, undefined);
 
-    const stillCurrent = () => seq === refreshSeq && selectUsageProvider(currentCtx?.model) === provider;
+    const stillCurrent = () => seq === refreshSeq && isActive(ctx, lifecycle);
     try {
       const snapshot = await fetchActiveUsage(provider, ctx);
       if (!stillCurrent()) return;
       lastSnapshot = snapshot;
-      showSnapshotStatus(snapshot, dim);
+      showSnapshotStatus(ctx, lifecycle, snapshot, dim);
     } catch (error) {
       if (!stillCurrent()) return;
-      showStatus(formatErrorState(error), dim);
+      showStatus(ctx, lifecycle, formatErrorState(error), dim);
     }
   }
 
   const controller = createPeriodicRefresh(async () => {
-    if (currentCtx) await refreshUsage(currentCtx);
+    const ctx = currentCtx;
+    if (ctx) await refreshUsage(ctx);
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    currentCtx = ctx as PiContext;
-    void refreshUsage(currentCtx).catch((err) => console.error("[pi-quota] startup error:", err));
+    activateCtx(ctx as PiContext);
+    void refreshUsage(ctx as PiContext).catch((err) => console.error("[pi-quota] startup error:", err));
   });
 
   pi.on("agent_start", async (_event, ctx) => {
-    currentCtx = ctx as PiContext;
+    activateCtx(ctx as PiContext);
     controller.start();
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    currentCtx = ctx as PiContext;
+    activateCtx(ctx as PiContext);
     controller.stop();
-    void refreshUsage(currentCtx).catch((err) => console.error("[pi-quota] agent_end error:", err));
+    void refreshUsage(ctx as PiContext).catch((err) => console.error("[pi-quota] agent_end error:", err));
   });
 
   pi.on("model_select", async (_event, ctx) => {
-    currentCtx = ctx as PiContext;
-    if (!selectUsageProvider(currentCtx.model)) return showStatus(undefined);
-    if (lastSnapshot) showSnapshotStatus(lastSnapshot, true);
-    void refreshUsage(currentCtx).catch((err) => console.error("[pi-quota] model_select error:", err));
+    const modelCtx = ctx as PiContext;
+    const lifecycle = activateCtx(modelCtx);
+    if (!selectUsageProvider(modelCtx.model)) return showStatus(modelCtx, lifecycle, undefined);
+    if (lastSnapshot) showSnapshotStatus(modelCtx, lifecycle, lastSnapshot, true);
+    void refreshUsage(modelCtx).catch((err) => console.error("[pi-quota] model_select error:", err));
   });
 
-  pi.on("session_shutdown", () => controller.stop());
+  pi.on("session_shutdown", () => {
+    controller.stop();
+    invalidateCtx();
+  });
 
   pi.registerCommand("quota", {
     description: "Show Codex and OpenCode Go coding plan quota usage",
     handler: async (_args, ctx) => {
       const commandCtx = ctx as PiContext;
-      currentCtx = commandCtx;
+      const lifecycle = activateCtx(commandCtx);
       const results = await Promise.allSettled([
         fetchActiveUsage("codex", commandCtx),
         fetchActiveUsage("opencode-go", commandCtx),
@@ -127,10 +167,18 @@ export default function (pi: ExtensionAPI): void {
         formatCommandSection("Codex", results[0]),
         formatCommandSection("OpenCode Go", results[1]),
       ];
-      ctx.ui.notify(sections.join("\n\n"), "info");
+      if (isActive(commandCtx, lifecycle)) {
+        try {
+          commandCtx.ui.notify(sections.join("\n\n"), "info");
+        } catch (error) {
+          ignoreStaleCtxError(error);
+        }
+      }
 
-      const provider = selectUsageProvider(commandCtx.model);
-      if (provider) void refreshUsage(commandCtx).catch((err) => console.error("[pi-quota] quota refresh error:", err));
+      if (isActive(commandCtx, lifecycle)) {
+        const provider = selectUsageProvider(commandCtx.model);
+        if (provider) void refreshUsage(commandCtx).catch((err) => console.error("[pi-quota] quota refresh error:", err));
+      }
     },
   });
 }
