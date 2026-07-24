@@ -7,9 +7,17 @@ const REQUEST_TIMEOUT_MS = 8_000;
 export function parseCodexUsageResponse(data: unknown, now = Date.now()): UsageSnapshot {
   const root = asRecord(data);
   const rateLimit = asRecord(root.rate_limit ?? root);
+  const primaryWindow = asRecord(rateLimit.primary_window);
+  const secondaryWindow = asRecord(rateLimit.secondary_window);
+  // Older responses expose a 5-hour primary window plus a weekly secondary
+  // window. The current weekly-only response exposes just primary_window.
+  // Prefer an explicit duration/name when available, and otherwise use the
+  // presence of the legacy secondary window to distinguish the two shapes.
+  const hasSecondaryWindow = numberValue(secondaryWindow.used_percent) !== null;
   const limits = [
-    parseWindow("5h", asRecord(rateLimit.primary_window), now, "relative"),
-    parseWindow("week", asRecord(rateLimit.secondary_window), now, "weekday"),
+    parseWindow(inferWindowLabel(primaryWindow, hasSecondaryWindow ? "5h" : "week"), primaryWindow, now),
+    parseWindow(inferWindowLabel(secondaryWindow, "week"), secondaryWindow, now),
+    parseWindow("month", asRecord(rateLimit.monthly_window ?? rateLimit.month_window), now),
     ...parseSparkLimits(root, now),
   ].filter((limit): limit is NonNullable<typeof limit> => limit !== null);
 
@@ -54,16 +62,42 @@ function parseSparkLimits(root: Record<string, unknown>, now: number) {
   );
   if (!spark) return [];
   const rateLimit = asRecord(asRecord(spark).rate_limit);
-  const primary = parseWindow("spark 5h", asRecord(rateLimit.primary_window), now, "relative");
-  const secondary = parseWindow("spark week", asRecord(rateLimit.secondary_window), now, "weekday");
+  const primary = parseWindow("spark 5h", asRecord(rateLimit.primary_window), now);
+  const secondary = parseWindow("spark week", asRecord(rateLimit.secondary_window), now);
   return [primary, secondary].filter((limit) => limit !== null);
 }
 
-function parseWindow(label: string, value: Record<string, unknown>, now: number, resetStyle: ResetStyle) {
+function parseWindow(label: string, value: Record<string, unknown>, now: number) {
   const percentage = numberValue(value.used_percent);
   const nextResetTime = resetTime(value, now);
   if (percentage === null || nextResetTime === null) return null;
-  return { label, percentage, nextResetTime, resetStyle };
+  return { label, percentage, nextResetTime, resetStyle: resetStyleForLabel(label) };
+}
+
+function inferWindowLabel(value: Record<string, unknown>, fallback: "5h" | "week" | "month"): "5h" | "week" | "month" {
+  const name = [value.label, value.name, value.limit_name, value.window_name, value.period]
+    .map(stringValue)
+    .find((candidate): candidate is string => candidate !== undefined)
+    ?.toLowerCase();
+  if (name?.includes("month")) return "month";
+  if (name?.includes("week")) return "week";
+  if (name?.includes("hour") || name?.includes("5h")) return "5h";
+
+  const duration = [value.limit_window_seconds, value.window_seconds, value.window_duration_seconds, value.duration_seconds, value.period_seconds]
+    .map(numberValue)
+    .find((candidate): candidate is number => candidate !== null);
+  if (duration !== undefined) {
+    if (duration >= 24 * 86_400) return "month";
+    if (duration >= 5 * 86_400) return "week";
+    if (duration <= 12 * 3_600) return "5h";
+  }
+  return fallback;
+}
+
+function resetStyleForLabel(label: string): ResetStyle {
+  if (label === "week" || label === "spark week") return "weekday";
+  if (label === "month") return "date";
+  return "relative";
 }
 
 function resetTime(value: Record<string, unknown>, now: number): number | null {

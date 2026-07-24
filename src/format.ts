@@ -87,7 +87,7 @@ function formatLongLimitLabel(label: string): string {
 
 function isPrimaryLimit(provider: UsageSnapshot["provider"], label: string): boolean {
   const normalized = label.toLowerCase();
-  if (provider === "codex") return normalized === "5h" || normalized === "week" || normalized === "weekly";
+  if (provider === "codex") return normalized === "5h" || normalized === "week" || normalized === "weekly" || normalized === "month" || normalized === "monthly";
   return normalized === "5h" || normalized === "week" || normalized === "weekly" || normalized === "month" || normalized === "monthly";
 }
 
